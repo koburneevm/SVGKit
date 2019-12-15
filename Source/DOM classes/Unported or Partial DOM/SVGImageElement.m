@@ -139,6 +139,59 @@ CGImageRef SVGImageCGImage(UIImage *img)
     
 	if( image != nil )
 	{
+        if (image.imageOrientation != UIImageOrientationUp) {
+            CGAffineTransform transform = CGAffineTransformIdentity;
+            switch (image.imageOrientation) {
+                case UIImageOrientationDown:
+                case UIImageOrientationDownMirrored:
+                    transform = CGAffineTransformTranslate(transform, image.size.width, image.size.height);
+                    transform = CGAffineTransformRotate(transform, M_PI);
+                    break;
+                case UIImageOrientationLeft:
+                case UIImageOrientationLeftMirrored:
+                    transform = CGAffineTransformTranslate(transform, image.size.width, 0);
+                    transform = CGAffineTransformRotate(transform, M_PI_2);
+                    break;
+                case UIImageOrientationRight:
+                case UIImageOrientationRightMirrored:
+                    transform = CGAffineTransformTranslate(transform, 0, image.size.height);
+                    transform = CGAffineTransformRotate(transform, -M_PI_2);
+                    break;
+                default:
+                    break;
+            }
+            switch (image.imageOrientation) {
+                case UIImageOrientationUpMirrored:
+                case UIImageOrientationDownMirrored:
+                    transform = CGAffineTransformTranslate(transform, image.size.width, 0);
+                    transform = CGAffineTransformScale(transform, -1, 1);
+                    break;
+                case UIImageOrientationLeftMirrored:
+                case UIImageOrientationRightMirrored:
+                    transform = CGAffineTransformTranslate(transform, image.size.height, 0);
+                    transform = CGAffineTransformScale(transform, -1, 1);
+                default:
+                    break;
+            }
+            CGImageRef cgImage = image.CGImage;
+            size_t bits = CGImageGetBitsPerComponent(cgImage);
+            CGColorSpaceRef space = CGImageGetColorSpace(cgImage);
+            CGBitmapInfo info = CGImageGetBitmapInfo(cgImage);
+            CGContextRef ctx = CGBitmapContextCreate(nil, image.size.width, image.size.height, bits, 0, space, info);
+            CGContextConcatCTM(ctx, transform);
+            UIImageOrientation orientation = image.imageOrientation;
+            if (orientation == UIImageOrientationLeft ||
+                orientation == UIImageOrientationLeftMirrored ||
+                orientation == UIImageOrientationRight ||
+                orientation == UIImageOrientationRightMirrored) {
+                CGContextDrawImage(ctx, CGRectMake(0, 0, image.size.height, image.size.width), cgImage);
+            } else {
+                CGContextDrawImage(ctx, CGRectMake(0, 0, image.size.width, image.size.height), cgImage);
+            }
+            CGImageRef newImage = CGBitmapContextCreateImage(ctx);
+            image = [UIImage imageWithCGImage:newImage];
+        }
+        
         CGRect frame = CGRectMake(_x, _y, _width, _height);
         
         if( imageData )

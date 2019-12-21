@@ -58,48 +58,71 @@ CGImageRef SVGImageCGImage(UIImage *img)
     [SVGHelperUtilities parsePreserveAspectRatioFor:self];
 }
 
+- (UIImage *)scaleImage:(UIImage*)image toSize:(CGSize)newSize {
+    CGRect newRect = CGRectIntegral(CGRectMake(0, 0, newSize.width, newSize.height));
+    CGImageRef imageRef = image.CGImage;
+
+    UIGraphicsBeginImageContextWithOptions(newSize, NO, [UIScreen mainScreen].scale);
+    CGContextRef context = UIGraphicsGetCurrentContext();
+
+    // Set the quality level to use when rescaling
+    CGContextSetInterpolationQuality(context, kCGInterpolationLow);
+    CGAffineTransform flipVertical = CGAffineTransformMake(1, 0, 0, -1, 0, newSize.height);
+
+    CGContextConcatCTM(context, flipVertical);
+    // Draw into the context; this scales the image
+    CGContextDrawImage(context, newRect, imageRef);
+
+    // Get the resized image from the context and a UIImage
+    CGImageRef newImageRef = CGBitmapContextCreateImage(context);
+    UIImage *newImage = [UIImage imageWithCGImage:newImageRef];
+
+    CGImageRelease(newImageRef);
+    UIGraphicsEndImageContext();
+
+    return newImage;
+}
 
 - (CALayer *) newLayer
 {
-	CALayer* newLayer = [CALayerWithClipRender layer];
-	
-	[SVGHelperUtilities configureCALayer:newLayer usingElement:self];
-	
-	NSData *imageData;
-	NSURL* imageURL = [NSURL URLWithString:_href];
-	SVGKSource* effectiveSource = nil;
+    CALayer* newLayer = [CALayerWithClipRender layer];
+    [SVGHelperUtilities configureCALayer:newLayer usingElement:self];
+    
+    NSData *imageData;
+    NSURL* imageURL = [NSURL URLWithString:_href];
+    SVGKSource* effectiveSource = nil;
     if ([_href hasPrefix:@"http:"] || [_href hasPrefix:@"https:"] || imageURL.isFileURL)
-		imageData = [NSData dataWithContentsOfURL:imageURL];
-	else
-	if( [_href hasPrefix:@"data:"])
-	{
-		self.href = [_href stringByReplacingOccurrencesOfString:@"\\s+"
-												 withString:@""
-													options:NSRegularExpressionSearch
-													  range:NSMakeRange(0, [_href length]) ];
-		
-		imageData = [NSData dataWithContentsOfURL:[NSURL URLWithString:_href]];
-	}
-	else
-	{
-		effectiveSource = [self.rootOfCurrentDocumentFragment.source sourceFromRelativePath:_href];
-		NSInputStream *stream = effectiveSource.stream;
-        if (stream) {
-            [stream open]; // if we do this, we CANNOT parse from this source again in future
-            NSError *error = nil;
-            imageData = [NSData dataWithContentsOfStream:stream initialCapacity:NSUIntegerMax error:&error];
-            if( error )
-                SVGKitLogError(@"[%@] ERROR: unable to read stream from %@ into NSData: %@", [self class], _href, error);
-        } else {
-            SVGKitLogError(@"[%@] ERROR: unable to load the source from URL: %@", [self class], _href);
+        imageData = [NSData dataWithContentsOfURL:imageURL];
+    else
+        if( [_href hasPrefix:@"data:"])
+        {
+            self.href = [_href stringByReplacingOccurrencesOfString:@"\\s+"
+                                                         withString:@""
+                                                            options:NSRegularExpressionSearch
+                                                              range:NSMakeRange(0, [_href length]) ];
+            
+            imageData = [NSData dataWithContentsOfURL:[NSURL URLWithString:_href]];
         }
-	}
-	
-	/** Now we have some raw bytes, try to load using Apple's image loaders
-	 (will fail if the image is an SVG file)
-	 */
-	UIImage *image = [[UIImage alloc] initWithData:imageData];
-	
+        else
+        {
+            effectiveSource = [self.rootOfCurrentDocumentFragment.source sourceFromRelativePath:_href];
+            NSInputStream *stream = effectiveSource.stream;
+            if (stream) {
+                [stream open]; // if we do this, we CANNOT parse from this source again in future
+                NSError *error = nil;
+                imageData = [NSData dataWithContentsOfStream:stream initialCapacity:NSUIntegerMax error:&error];
+                if( error )
+                    SVGKitLogError(@"[%@] ERROR: unable to read stream from %@ into NSData: %@", [self class], _href, error);
+            } else {
+                SVGKitLogError(@"[%@] ERROR: unable to load the source from URL: %@", [self class], _href);
+            }
+        }
+    
+    /** Now we have some raw bytes, try to load using Apple's image loaders
+     (will fail if the image is an SVG file)
+     */
+    UIImage *image = [[UIImage alloc] initWithData:imageData];
+    
     if( image == nil ) // NSData doesn't contain an imageformat Apple supports; might be an SVG instead
     {
         SVGKImage *svg = nil;
@@ -137,11 +160,13 @@ CGImageRef SVGImageCGImage(UIImage *img)
         }
     }
     
-	if( image != nil )
-	{
-        if (image.imageOrientation != UIImageOrientationUp) {
+    if( image != nil )
+    {
+        UIImageOrientation imageOrientation = image.imageOrientation;
+        image = [self scaleImage:image toSize:CGSizeMake(_width, _height)];
+        if (imageOrientation != UIImageOrientationUp) {
             CGAffineTransform transform = CGAffineTransformIdentity;
-            switch (image.imageOrientation) {
+            switch (imageOrientation) {
                 case UIImageOrientationDown:
                 case UIImageOrientationDownMirrored:
                     transform = CGAffineTransformTranslate(transform, image.size.width, image.size.height);
@@ -160,7 +185,7 @@ CGImageRef SVGImageCGImage(UIImage *img)
                 default:
                     break;
             }
-            switch (image.imageOrientation) {
+            switch (imageOrientation) {
                 case UIImageOrientationUpMirrored:
                 case UIImageOrientationDownMirrored:
                     transform = CGAffineTransformTranslate(transform, image.size.width, 0);
@@ -179,7 +204,7 @@ CGImageRef SVGImageCGImage(UIImage *img)
             CGBitmapInfo info = CGImageGetBitmapInfo(cgImage);
             CGContextRef ctx = CGBitmapContextCreate(nil, image.size.width, image.size.height, bits, 0, space, info);
             CGContextConcatCTM(ctx, transform);
-            UIImageOrientation orientation = image.imageOrientation;
+            UIImageOrientation orientation = imageOrientation;
             if (orientation == UIImageOrientationLeft ||
                 orientation == UIImageOrientationLeftMirrored ||
                 orientation == UIImageOrientationRight ||
@@ -189,7 +214,9 @@ CGImageRef SVGImageCGImage(UIImage *img)
                 CGContextDrawImage(ctx, CGRectMake(0, 0, image.size.width, image.size.height), cgImage);
             }
             CGImageRef newImage = CGBitmapContextCreateImage(ctx);
+            CGContextRelease(ctx);
             image = [UIImage imageWithCGImage:newImage];
+            CGImageRelease(newImage);
         }
         
         CGRect frame = CGRectMake(_x, _y, _width, _height);
@@ -228,17 +255,17 @@ CGImageRef SVGImageCGImage(UIImage *img)
         newLayer.contents = (__bridge id)imageRef;
         if( imageRefHasBeenRetained )
             CGImageRelease( imageRef );
-	}
-		
+    }
+    
 #if OLD_CODE
-	__block CALayer *layer = [[CALayer layer] retain];
-
-	layer.name = self.identifier;
-	[layer setValue:self.identifier forKey:kSVGElementIdentifier];
-	
-	CGRect frame = CGRectMake(_x, _y, _width, _height);
-	frame = CGRectApplyAffineTransform(frame, [SVGHelperUtilities transformAbsoluteIncludingViewportForTransformableOrViewportEstablishingElement:self]);
-	layer.frame = frame;
+    __block CALayer *layer = [[CALayer layer] retain];
+    
+    layer.name = self.identifier;
+    [layer setValue:self.identifier forKey:kSVGElementIdentifier];
+    
+    CGRect frame = CGRectMake(_x, _y, _width, _height);
+    frame = CGRectApplyAffineTransform(frame, [SVGHelperUtilities transformAbsoluteIncludingViewportForTransformableOrViewportEstablishingElement:self]);
+    layer.frame = frame;
     
     dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_LOW, 0), ^{
         NSData *imageData = [NSData dataWithContentsOfURL:[NSURL URLWithString:_href]];
@@ -247,16 +274,16 @@ CGImageRef SVGImageCGImage(UIImage *img)
         //    _href = @"http://b.dryicons.com/images/icon_sets/coquette_part_4_icons_set/png/128x128/png_file.png";
         //    NSData *imageData = [NSData dataWithContentsOfURL:[NSURL URLWithString:_href]];
         //    UIImage *image = [UIImage imageWithData:imageData];
-
+        
         dispatch_async(dispatch_get_main_queue(), ^{
             layer.contents = (id)SVGImageCGImage(image);
         });
     });
-
+    
     return layer;
 #endif
-	
-	return newLayer;
+    
+    return newLayer;
 }
 
 - (CGRect)clipFrame:(CGRect)frame fromRatio:(double)ratioOfRatios
